@@ -15,6 +15,7 @@ import org.egov.platform.individual.Constants;
 import org.egov.platform.individual.config.IndividualProperties;
 import org.egov.platform.individual.producer.IndividualProducer;
 import org.egov.platform.individual.repository.ServiceRequestRepository;
+import org.egov.platform.localization.LocalizationApi;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -35,6 +36,15 @@ public class NotificationService {
 
     @Autowired
     private RestTemplate restTemplate;
+
+    // In-process call into the localization module (replaces the former HTTP call).
+    // Constructor-injected: Spring Modulith requires cross-module dependencies to be
+    // explicit in the constructor, not hidden in a field.
+    private final LocalizationApi localizationApi;
+
+    public NotificationService(LocalizationApi localizationApi) {
+        this.localizationApi = localizationApi;
+    }
 
     /**
      * Sends notification by putting the sms content onto the core-sms topic
@@ -158,30 +168,15 @@ public class NotificationService {
      */
     public Map<String, Map<String, String>> getLocalisedMessages(RequestInfo requestInfo, String rootTenantId, String locale, String module) {
         Map<String, Map<String, String>> localizedMessageMap = new HashMap<>();
-        Map<String, String> mapOfCodesAndMessages = new HashMap<>();
-        StringBuilder uri = new StringBuilder();
-        RequestInfoWrapper requestInfoWrapper = new RequestInfoWrapper();
-        requestInfoWrapper.setRequestInfo(requestInfo);
-        uri.append(config.getLocalizationHost()).append(config.getLocalizationContextPath())
-                .append(config.getLocalizationSearchEndpoint()).append("?tenantId=" + rootTenantId)
-                .append("&module=" + module).append("&locale=" + locale);
-        List<String> codes = null;
-        List<String> messages = null;
-        Object result = null;
         try {
-            result = repository.fetchResult(uri, requestInfoWrapper);
-            codes = JsonPath.read(result, Constants.INDIVIDUAL_LOCALIZATION_CODES_JSONPATH);
-            messages = JsonPath.read(result, Constants.INDIVIDUAL_LOCALIZATION_MSGS_JSONPATH);
-        } catch (Exception e) {
-            log.error("Exception while fetching from localization: " + e);
-        }
-        if (null != result) {
-            for (int i = 0; i < codes.size(); i++) {
-                mapOfCodesAndMessages.put(codes.get(i), messages.get(i));
-            }
+            // BEFORE: HTTP POST to config.getLocalizationHost() + "/localization/messages/v1/_search".
+            // AFTER:  in-process call across the module boundary into the localization module.
+            Map<String, String> mapOfCodesAndMessages =
+                    localizationApi.getMessages(rootTenantId, module, locale, null);
             localizedMessageMap.put(locale + "|" + rootTenantId, mapOfCodesAndMessages);
+        } catch (Exception e) {
+            log.error("Exception while fetching from localization (in-process): " + e);
         }
-
         return localizedMessageMap;
     }
 

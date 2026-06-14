@@ -13,7 +13,7 @@ import org.egov.common.models.individual.Identifier;
 import org.egov.common.models.individual.Individual;
 import org.egov.common.models.individual.IndividualBulkRequest;
 import org.egov.common.models.individual.Skill;
-import org.egov.common.service.IdGenService;
+import org.egov.platform.idgen.IdGenApi;
 import org.egov.platform.individual.config.IndividualProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -35,14 +35,15 @@ import static org.egov.platform.individual.Constants.SYSTEM_GENERATED;
 @Slf4j
 public class EnrichmentService {
 
-    private final IdGenService idGenService;
+    // In-process API of the idgen module (replaces the library IdGenService HTTP client).
+    private final IdGenApi idGenApi;
 
     private final IndividualProperties properties;
 
     @Autowired
-    public EnrichmentService(IdGenService idGenService,
+    public EnrichmentService(IdGenApi idGenApi,
                              IndividualProperties properties) {
-        this.idGenService = idGenService;
+        this.idGenApi = idGenApi;
         this.properties = properties;
     }
 
@@ -53,8 +54,7 @@ public class EnrichmentService {
         //fetch the root tenantId if it is in state.city format
         final String tenantId = getTenantId(validIndividuals).split("\\.")[0];
         log.info("generating id for individuals");
-        List<String> indIdList = idGenService.getIdList(request.getRequestInfo(),
-                tenantId, properties.getIndividualId(),
+        List<String> indIdList = idGenApi.generateIds(tenantId, properties.getIndividualId(),
                 null, validIndividuals.size());
         log.info("enriching individuals");
 
