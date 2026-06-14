@@ -1,0 +1,16 @@
+@startuml
+title Idgen
+
+top to bottom direction
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+Container_Boundary("PlatformApplication.PlatformApplication_boundary", "PlatformApplication", $tags="") {
+  Component(PlatformApplication.PlatformApplication.Idgen, "Idgen", "Module", "", $tags="")
+}
+
+
+SHOW_LEGEND(true)
+@enduml
