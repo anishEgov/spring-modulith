@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: platform
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://localhost:5432/postgres
+    username: postgres
+    password: postgres
+  flyway:
+    enabled: false
+    # Each module owns its own migration folder; merged here as the single Flyway config.
+    locations: classpath:db/migration/idgen,classpath:db/migration/localization,classpath:db/migration/individual
+    table: platform_schema_version
+    baseline-on-migrate: true
+    out-of-order: true
+
+app:
+  timezone: UTC
