@@ -1,5 +1,0 @@
-[%autowidth.stretch, cols="h,a"]
-|===
-|Base package
-|`org.egov.platform.localization`
-|===
