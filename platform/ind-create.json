@@ -1,0 +1,19 @@
+{
+  "RequestInfo": {
+    "apiId": "individual", "ver": "1.0", "ts": 0, "action": "_create",
+    "did": "1", "key": "", "msgId": "1|en_IN", "authToken": "",
+    "userInfo": {
+      "id": 1, "uuid": "11111111-1111-1111-1111-111111111111",
+      "userName": "tester", "type": "EMPLOYEE", "tenantId": "dev",
+      "roles": [{"name": "Individual Creator", "code": "INDIVIDUAL_CREATOR", "tenantId": "dev"}]
+    }
+  },
+  "Individual": {
+    "tenantId": "dev",
+    "name": {"givenName": "John", "familyName": "Doe"},
+    "gender": "MALE",
+    "mobileNumber": "9999999999",
+    "dateOfBirth": 631152000000,
+    "isSystemUser": false
+  }
+}
