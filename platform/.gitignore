@@ -1,6 +1,6 @@
 target/
 *.class
 *.log
-.idea/
+*.idea/
 *.iml
 .DS_Store
