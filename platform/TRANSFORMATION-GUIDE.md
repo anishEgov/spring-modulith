@@ -366,6 +366,56 @@ Pieces:
 > `@Transactional`: the listener runs on a different thread, only after the publisher's
 > transaction commits — the async decoupling a broker gave us, but in-process.
 
-## 11.3 How to run / verify
-_(filled in once the code + test are in place)_
+## 11.3 Files changed
+- `pom.xml` — added `spring-modulith-starter-jdbc` (event publication registry).
+- `application.properties` — `spring.modulith.events.jdbc.schema-initialization.enabled=true`
+  and `republish-outstanding-events-on-restart=true`.
+- `PlatformApplication` — `@EnableAsync` (so `@ApplicationModuleListener`'s `@Async` takes effect).
+- `individual/IndividualCreatedEvent.java` — **new** exposed event type.
+- `persistence/` — **new module**: `IndividualPersistenceListener` + `package-info.java`.
+- `individual/service/IndividualService.java` — publishes the event after save.
+- `test/.../persistence/PersistenceModuleTests.java` — **new** verification test.
+
+## 11.4 How to run / verify
+
+> Build note: pin JDK 17 — `export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64`.
+
+**Structural boundaries still hold** (the new `persistence` module is a legal citizen):
+```
+mvn -Dtest=ModularityTests test          # 3 tests green; persistence module recognized
+```
+
+**The async event actually persists** (needs docker-compose Postgres up on :5433):
+```
+docker compose up -d postgres
+mvn -Dtest=PersistenceModuleTests test    # green
+```
+The test publishes `IndividualCreatedEvent` in a transaction and polls for the DB row.
+
+**What it proved** (observed output):
+- Listener ran on a **different thread** (`task-1`, not `main`) → genuinely async:
+  ```
+  [persistence] received IndividualCreatedEvent with 1 individual(s) on thread task-1
+  [persistence] persisted individual id=modulith-test-…
+  ```
+- Row landed in Postgres:
+  ```
+  SELECT id, givenname, individualid FROM individual WHERE id LIKE 'modulith-test-%';
+  → Test | IND-TEST
+  ```
+- The registry tracked the event and marked it **completed** — this is the durability /
+  at-least-once guarantee that makes modulith events broker-like:
+  ```
+  SELECT event_type, listener_id, completion_date IS NOT NULL AS completed FROM event_publication;
+  → IndividualCreatedEvent | …IndividualPersistenceListener.on(…) | t
+  ```
+
+## 11.5 Caveat worth remembering
+`@ApplicationModuleListener` is `AFTER_COMMIT`, so **delivery requires the publish to run
+inside a transaction**. The test uses a `TransactionTemplate`; in production
+`IndividualService.create` would need a transactional boundary for the event to be
+delivered (otherwise the after-commit listener never fires). The verification test isolates
+the `persistence` module with its own minimal `@SpringBootApplication` test config, because
+`PlatformApplication`'s broad `@ComponentScan` otherwise defeats `@ApplicationModuleTest`
+slicing and drags in every module's beans (e.g. localization's Redis config).
 

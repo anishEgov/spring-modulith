@@ -23,6 +23,7 @@ import org.egov.common.models.project.ApiOperation;
 import org.egov.common.models.user.UserRequest;
 import org.egov.common.utils.CommonUtils;
 import org.egov.common.validator.Validator;
+import org.egov.platform.individual.IndividualCreatedEvent;
 import org.egov.platform.individual.config.IndividualProperties;
 import org.egov.platform.individual.repository.IndividualRepository;
 import org.egov.platform.individual.util.BeneficiaryIdGenUtil;
@@ -43,6 +44,7 @@ import org.egov.platform.individual.validators.UniqueEntityValidator;
 import org.egov.platform.individual.validators.UniqueSubEntityValidator;
 import org.egov.tracer.model.CustomException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.ObjectUtils;
@@ -81,6 +83,10 @@ public class IndividualService {
 
     private final BeneficiaryIdGenUtil beneficiaryIdGenUtil;
 
+    // Publishes IndividualCreatedEvent for the persistence module to handle asynchronously.
+    // This is the in-process Spring Modulith replacement for the Kafka save-individual-topic hop.
+    private final ApplicationEventPublisher eventPublisher;
+
     private final Predicate<Validator<IndividualBulkRequest, Individual>> isApplicableForUpdate = validator ->
             validator.getClass().equals(NullIdValidator.class)
                     || validator.getClass().equals(IBoundaryValidator.class)
@@ -118,7 +124,8 @@ public class IndividualService {
                              IndividualEncryptionService individualEncryptionService,
                              UserIntegrationService userIntegrationService,
                              NotificationService notificationService,
-                             BeneficiaryIdGenUtil beneficiaryIdGenUtil) {
+                             BeneficiaryIdGenUtil beneficiaryIdGenUtil,
+                             ApplicationEventPublisher eventPublisher) {
         this.individualRepository = individualRepository;
         this.validators = validators;
         this.properties = properties;
@@ -127,6 +134,7 @@ public class IndividualService {
         this.userIntegrationService = userIntegrationService;
         this.notificationService = notificationService;
         this.beneficiaryIdGenUtil = beneficiaryIdGenUtil;
+        this.eventPublisher = eventPublisher;
     }
 
     public List<Individual> create(IndividualRequest request) {
@@ -171,6 +179,10 @@ public class IndividualService {
                             .encrypt(request, validIndividuals, "IndividualEncrypt", isBulk);
                     individualRepository.save(encryptedIndividualList,
                             properties.getSaveIndividualTopic());
+                    // Event-driven persistence: publish an in-process Spring Modulith event
+                    // for the persistence module to handle asynchronously (after this method's
+                    // transaction commits), replacing the cross-process Kafka -> egov-persister hop.
+                    publishIndividualCreatedEvent(validIndividuals);
                     // update beneficiary ids in idgen
                     if (properties.getBeneficiaryIdGenIntegrationEnabled()) {
                         beneficiaryIdGenUtil.updateBeneficiaryIds(beneficiaryIds, validIndividuals.get(0).getTenantId(), request.getRequestInfo());
@@ -187,6 +199,34 @@ public class IndividualService {
         List<Individual> decryptedIndividualList = individualEncryptionService.decrypt(encryptedIndividualList,
                 "IndividualDecrypt", request.getRequestInfo());
         return decryptedIndividualList;
+    }
+
+    /**
+     * Maps the enriched individuals to a flat {@link IndividualCreatedEvent} and publishes it.
+     *
+     * <p>The persistence module's {@code @ApplicationModuleListener} consumes this on a
+     * separate thread after the surrounding transaction commits. (For delivery, the publish
+     * must run inside a transaction — in tests the modulith {@code Scenario} provides one.)
+     */
+    private void publishIndividualCreatedEvent(List<Individual> individuals) {
+        if (CollectionUtils.isEmpty(individuals)) {
+            return;
+        }
+        List<IndividualCreatedEvent.Row> rows = individuals.stream()
+                .map(i -> new IndividualCreatedEvent.Row(
+                        i.getId(),
+                        i.getTenantId(),
+                        i.getName() != null ? i.getName().getGivenName() : null,
+                        i.getName() != null ? i.getName().getFamilyName() : null,
+                        i.getMobileNumber(),
+                        i.getIndividualId(),
+                        i.getAuditDetails() != null ? i.getAuditDetails().getCreatedBy() : null,
+                        i.getAuditDetails() != null ? i.getAuditDetails().getCreatedTime() : null,
+                        i.getRowVersion() != null ? i.getRowVersion().longValue() : null,
+                        i.getIsDeleted()))
+                .collect(Collectors.toList());
+        log.info("publishing IndividualCreatedEvent for {} individual(s)", rows.size());
+        eventPublisher.publishEvent(new IndividualCreatedEvent(rows));
     }
 
     private Tuple<List<Individual>, Map<Individual, ErrorDetails>> validate(List<Validator<IndividualBulkRequest, Individual>> validators,

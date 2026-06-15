@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
  * Single entry point for the modular monolith.
@@ -21,6 +22,9 @@ import org.springframework.context.annotation.Import;
  */
 @SpringBootApplication
 @EnableCaching
+// @ApplicationModuleListener is meta-annotated @Async; @EnableAsync makes the async
+// (off-thread, after-commit) event handling in the persistence module actually take effect.
+@EnableAsync
 @Import(TracerConfiguration.class)
 // Scan the platform modules plus the egov library packages whose beans the modules
 // autowire (mdms-client). individual's MainConfiguration additionally scans
