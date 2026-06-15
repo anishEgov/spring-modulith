@@ -445,6 +445,51 @@ the event is **retained, incomplete, with its full payload**:
 So an in-process modulith event gives the same "don't lose it if the consumer is down"
 property a message broker gives — backed by the `event_publication` table instead of Kafka.
 
+## 11.7 Q: "Where are these events stored? I never allocated a DB for events."
+
+**Short answer: in the same `platform` Postgres you already have — no new DB, no new
+container, no new datasource.** The events live in one extra *table*, not a separate store.
+
+```
+spring.datasource.url = jdbc:postgresql://localhost:5433/platform
+                                                          ^^^^^^^^  same DB as everything else
+```
+```
+SELECT current_database(), schemaname, tablename
+FROM pg_tables WHERE tablename = 'event_publication';
+→ platform | public | event_publication
+```
+So `event_publication` sits in `platform.public`, right next to `individual`, `address`,
+`id_generator`, `message`. It shares the same connection pool as every module.
+
+### Why you don't remember allocating it — you didn't
+It is auto-created at startup by the one line we added:
+```properties
+spring.modulith.events.jdbc.schema-initialization.enabled=true
+```
+With that flag on, the `spring-modulith-starter-jdbc` jar runs its bundled DDL
+(`schema-postgresql.sql`, inside the jar) against the datasource on boot and issues
+`CREATE TABLE ... event_publication`. The table:
+```
+ id               uuid        not null   -- publication id
+ listener_id      text        not null   -- which @ApplicationModuleListener
+ event_type       text        not null   -- the event class
+ serialized_event text        not null   -- JSON payload (a few hundred bytes each)
+ publication_date timestamptz not null   -- when published
+ completion_date  timestamptz            -- set when the listener succeeds; NULL = outstanding
+```
+
+### Two things to know about it
+- **It is NOT in your Flyway migrations.** The `db/migration/{individual,idgen,localization}`
+  folders don't mention it and `platform_schema_version` doesn't track it — the modulith
+  starter owns this table, not Flyway. (So it won't appear in a migration review.)
+- **Completed rows are retained by default** — that's why the `event_publication` count
+  rose `1 → 2` across test runs. They are harmless history but grow over time. Options:
+  - `spring.modulith.events.completion-mode=delete` → the row is **deleted** on success,
+    so the table only ever holds *outstanding* (undelivered) events. _(Not currently set.)_
+  - or keep them as an audit trail and purge periodically via the
+    `CompletedEventPublications` bean / a scheduled cleanup.
+
 ## 11.5 Caveat worth remembering
 `@ApplicationModuleListener` is `AFTER_COMMIT`, so **delivery requires the publish to run
 inside a transaction**. The test uses a `TransactionTemplate`; in production
