@@ -72,6 +72,14 @@
             <groupId>org.springframework.modulith</groupId>
             <artifactId>spring-modulith-starter-core</artifactId>
         </dependency>
+        <!-- Event publication registry (event_publication table): durable, at-least-once,
+             retryable application events. Backs the async persistence listener and is the
+             proof that a published event ran its listener to completion. JDBC variant —
+             the app already uses plain JDBC, and it ships auto schema-initialization. -->
+        <dependency>
+            <groupId>org.springframework.modulith</groupId>
+            <artifactId>spring-modulith-starter-jdbc</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.modulith</groupId>
             <artifactId>spring-modulith-starter-test</artifactId>
