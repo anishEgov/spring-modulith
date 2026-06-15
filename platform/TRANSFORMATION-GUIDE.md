@@ -283,3 +283,89 @@ persister:
 2. Decide the **egov-user upgrade** as its own story (Boot 3 + Spring Authorization Server
    or external IdP) if user is to join the modulith.
 3. Add `@ApplicationModuleTest` slices per module for faster, isolated module tests.
+
+---
+
+# 11. Event-driven step — async persistence via a Modulith event
+
+This section is the running log of the second transformation: from **in-process facade
+calls** to **event-driven communication**, and the questions that shaped it.
+
+## 11.1 Q&A that shaped this step
+
+### Q1. Does `verify()` actually enforce boundaries, or is it decorative? Can an API call test it?
+**An API call cannot test it.** `ApplicationModules.verify()`
+(`ModularityTests.verifiesModularStructure`) is **static bytecode analysis** at test time
+(ArchUnit under the hood) — it never boots a server or runs code. It checks two things:
+1. No module references another module's **non-exposed** (sub-package) types.
+2. No **cyclic** dependencies between modules.
+
+An HTTP call only proves the endpoint runs — orthogonal to boundary enforcement.
+
+**How we proved `verify()` is real:** injected a deliberate violation — made
+`individual`'s `EnrichmentService` import `idgen`'s internal
+`org.egov.platform.idgen.service.IdGenerationService` (bypassing the `IdGenApi` facade).
+The test failed with exactly:
+```
+org.springframework.modulith.core.Violations:
+- Module 'individual' depends on non-exposed type
+  org.egov.platform.idgen.service.IdGenerationService within module 'idgen'!
+```
+Reverting → `BUILD SUCCESS`. The red→green flip is the proof: the facades are the only
+legal entry points because the real logic lives in non-exposed sub-packages.
+
+**Build gotcha:** project targets Java 17 but the machine default JDK is 25; Lombok
+1.18.22 can't run its annotation processor on JDK 25, so a *clean recompile* fails. Pin
+`JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64` (or bump Lombok ≥ 1.18.32).
+
+### Q2. "Modulith is nothing without events." Convert the `IdGenApi`/`LocalizationApi` calls to events.
+**Those two are the wrong candidates.** Modulith events (`@ApplicationModuleListener`) are
+**fire-and-forget** — the publisher gets nothing back. But both facade calls are
+**synchronous queries that need a return value inline**:
+- `IdGenApi.generateIds(...)` → IDs are stamped onto individuals **before they are saved**.
+- `LocalizationApi.getMessages(...)` → template is needed right then to build the SMS.
+
+Forcing these onto events needs a blocking request/reply hack — worse than the facade.
+**Queries stay as facade calls; events are for decoupled side-effects.**
+
+### Q3. To *test* an async event we need an observable side-effect — Notification or Persister?
+**Persister.** An async event only proves something if we can see its effect.
+
+| Candidate | Observable locally? | Verdict |
+|---|---|---|
+| Notification (SMS) | ✗ needs an SMS gateway credential; silently no-ops | rejected |
+| Persister (DB write) | ✓ Postgres already in `docker-compose.yml` (`localhost:5433`) | **chosen** |
+
+## 11.2 The change
+
+**Before:** `IndividualService.create` → `individualRepository.save(..., save-individual-topic)`
+pushes to **Kafka**; the **external `egov-persister` container** consumes it and writes the
+`individual` table. Async, but across a process + a broker.
+
+**After:** the Kafka hop becomes an **in-process Spring Modulith application event**:
+```
+individual module                         persistence module (new)
+-----------------                         ------------------------
+IndividualService.create()
+  publishes IndividualCreatedEvent  ──▶   @ApplicationModuleListener (async, after-commit)
+  (exposed type, root package)            IndividualPersistenceListener
+                                            └─ INSERT INTO individual (...)  [local Postgres]
+```
+
+Pieces:
+1. `spring-modulith-starter-jpa` — the **event publication registry** (`event_publication`
+   table). Makes events durable / at-least-once / retryable, and is our **proof**: a
+   completed row there == the async listener ran to completion.
+2. `org.egov.platform.individual.IndividualCreatedEvent` — exposed event type (root package)
+   so the `persistence` module may legally depend on it.
+3. `org.egov.platform.persistence` — **new module**, `IndividualPersistenceListener`
+   (`@ApplicationModuleListener`) inserts into `individual`.
+4. `IndividualService.create` publishes the event via `ApplicationEventPublisher`.
+
+> `@ApplicationModuleListener` = `@Async` + `@TransactionalEventListener(AFTER_COMMIT)` +
+> `@Transactional`: the listener runs on a different thread, only after the publisher's
+> transaction commits — the async decoupling a broker gave us, but in-process.
+
+## 11.3 How to run / verify
+_(filled in once the code + test are in place)_
+
