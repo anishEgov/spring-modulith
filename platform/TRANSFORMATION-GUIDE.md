@@ -410,6 +410,41 @@ The test publishes `IndividualCreatedEvent` in a transaction and polls for the D
   → IndividualCreatedEvent | …IndividualPersistenceListener.on(…) | t
   ```
 
+## 11.6 Proper test: in-process module only + durability
+
+Two follow-up questions were checked.
+
+### Stop the external persister so only the module writes
+```
+docker compose stop persister      # postgres/redis/kafka stay up
+```
+Now the in-process `@ApplicationModuleListener` is the only thing that can write
+`individual`. `PersistenceModuleTests.publishingEventInsertsExactlyOneRow` captures the
+row count before/after and asserts +1:
+```
+[before/after] individual rows: 1 -> 2     # written by the module, not egov-persister
+```
+(The test then deletes its own row, so the table returns to baseline.)
+
+### Does the event persist if the receiver can't consume it?  **Yes.**
+This is the broker-like guarantee. Spring Modulith writes every published event to
+`event_publication` **at publish time**, and only stamps `completion_date` when the
+listener **succeeds**. `failedDeliveryKeepsEventInRegistryForRetry` forces the listener to
+throw (publishes a row with `id = null`, violating the NOT-NULL primary key). Result —
+the event is **retained, incomplete, with its full payload**:
+```
+[durability] retained incomplete event payload:
+{"individuals":[{"id":null,"tenantId":"dev",…,"individualId":"DURABILITY-…"}]}
+```
+- `completion_date IS NULL` → never marked complete (receiver could not consume it).
+- the serialized payload is intact in the DB → nothing is lost.
+- with `spring.modulith.events.republish-outstanding-events-on-restart=true`, such
+  incomplete publications are **redelivered to the listener on the next app start**
+  (at-least-once). They persist in the table until processed (or purged).
+
+So an in-process modulith event gives the same "don't lose it if the consumer is down"
+property a message broker gives — backed by the `event_publication` table instead of Kafka.
+
 ## 11.5 Caveat worth remembering
 `@ApplicationModuleListener` is `AFTER_COMMIT`, so **delivery requires the publish to run
 inside a transaction**. The test uses a `TransactionTemplate`; in production
