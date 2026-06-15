@@ -63,6 +63,26 @@ curl -s -X POST "http://localhost:8080/v1/_create?echoResource=true" \
 }
 ```
 
-> Note: the `individual` DB table stays empty — DIGIT persists asynchronously via
-> egov-persister consuming the Kafka topic, which is not run here. This is unrelated to
-> the converted edges (which are proven by the generated ID and the SMS payload).
+## 6. Async persistence via egov-persister (real DIGIT flow)
+
+`docker compose up -d` also starts **egov-persister** (`egovio/egov-persister`), which:
+- connects to Kafka on the INTERNAL listener `kafka:29092` (the host JVM uses `localhost:9092`),
+- loads `persister-configs/individual-persister.yml`,
+- consumes `save-individual-topic` and INSERTs into `public.individual` (+ identifier/address/skill).
+
+So a create now persists for real:
+```
+POST /v1/_create
+  -> individualId IND-000004 (in-process idgen)
+  -> mobile stored encrypted (enc-client): 873783|DK3F...
+  -> produced to save-individual-topic
+  -> persister: "INSERT INTO public.individual ... Persisted 1 row(s) to DB!"
+  -> retrievable via POST /v1/_search?tenantId=dev  (HTTP 200, returns IND-000004)
+```
+
+Verify:
+```bash
+docker exec -i platform-postgres psql -U postgres -d platform -c \
+  "SELECT individualid, givenname, mobilenumber FROM individual;"
+docker logs platform-persister | grep "Persisted"
+```
