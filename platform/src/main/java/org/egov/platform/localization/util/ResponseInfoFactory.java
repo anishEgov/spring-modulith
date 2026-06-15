@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 
 import static org.egov.platform.localization.config.ServiceConstants.*;
 
-@Component
+@Component("localizationResponseInfoFactory")
 public class ResponseInfoFactory {
 
     public ResponseInfo createResponseInfoFromRequestInfo(final RequestInfo requestInfo, final Boolean success) {

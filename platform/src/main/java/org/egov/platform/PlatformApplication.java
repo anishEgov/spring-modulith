@@ -3,6 +3,8 @@ package org.egov.platform;
 import org.egov.tracer.config.TracerConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Import;
 
 /**
@@ -18,7 +20,12 @@ import org.springframework.context.annotation.Import;
  * Boundaries are enforced by {@code org.egov.platform.ModularityTests}, not by the network.
  */
 @SpringBootApplication
+@EnableCaching
 @Import(TracerConfiguration.class)
+// Scan the platform modules plus the egov library packages whose beans the modules
+// autowire (mdms-client). individual's MainConfiguration additionally scans
+// org.egov.common and org.egov.encryption.
+@ComponentScan(basePackages = {"org.egov.platform", "org.egov.mdms"})
 public class PlatformApplication {
 
     public static void main(String[] args) {

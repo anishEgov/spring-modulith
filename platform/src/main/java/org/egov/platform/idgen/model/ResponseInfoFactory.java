@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
  * @author Narendra
  *
  */
-@Service
+@Service("idgenResponseInfoFactory")
 public class ResponseInfoFactory {
 	public ResponseInfo createResponseInfoFromRequestInfo(RequestInfo requestInfo, Boolean success) {
 		String apiId = requestInfo.getApiId();
